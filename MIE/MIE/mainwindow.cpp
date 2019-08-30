@@ -4,10 +4,11 @@
 #include <QMessageBox>
 #include <QDirIterator>
 #include <thread>
+#include <QThread>
 #include <mutex>
-#include "private/qzipreader_p.h"
-#include "private/qzipwriter_p.h"
-#include <QDebug>
+#include "linuxprivate/qzipreader_p.h"
+#include "linuxprivate/qzipwriter_p.h"
+#include <QtGui>
 
 
 static std::mutex g_lock;
@@ -59,13 +60,11 @@ void DeleteAllFiles(const QString &path)
 
 void ImageConverter(QString path, int standartResolution, QString MTEPathTMP)
 {
-    QPixmap img;
-    img.load(path);
+    QImage img(path);
     if ((img.width() == img.height())&&(img.width() == standartResolution)){
        // Сохранение в ZIP
        QFileInfo fileI(path);
        QString fileName = fileI.baseName();
-
        g_lock.lock();
        while (QFile(MTEPathTMP+"/ZIP/"+fileName+".png").exists())
            fileName += "Z";
@@ -131,26 +130,33 @@ void MainWindow::on_pushButton_clicked()
 
     // Анализ изображений
     if (!exit){
-        QPixmap img;
+        QImage img;
         // Инициализация стандартного разрешения
         int standartResolution = 0;
         for (int i = 0; (i < nameFilter.size())&& (standartResolution == 0); i++ ){
-            img.load(nameFilter.at(i));
-             if (img.width() == img.height()) standartResolution = img.width();
+            QFileInfo fileI(nameFilter.at(i));
+             if (fileI.baseName() == "empty_armor_slot_boots"){
+                 img.load(nameFilter.at(i));
+                 standartResolution = img.width();
+             }
         }
 
         // Запуск потоков
         std::list<std::thread> threadList;
-        for (int i = 0; i < nameFilter.size(); i++ ){
-           threadList.push_back(std::thread(ImageConverter, nameFilter.at(i), standartResolution, MTEPathTMP));
-        }
+        int maxThreads = QThread::idealThreadCount();
+        for (int i = 0; i < nameFilter.size(); ){
+            int j = 0;
+            for (; i<nameFilter.size() && j < maxThreads; j++){
+                threadList.push_back(std::thread(ImageConverter, nameFilter.at(i), standartResolution, MTEPathTMP));
+                i++;           }
 
-        // Ожидание потоков
-        for (int i = 0; i < nameFilter.size(); i++ ){
-           if (threadList.begin()->joinable()) threadList.begin()->join();
-           threadList.pop_front();
-        }
+            for (; j > 0; j-- ){
+               if (threadList.begin()->joinable()) threadList.begin()->join();
+                threadList.pop_front();
+            }
 
+
+        }
     }
     ui->progressBar->setValue(50);
 
@@ -163,7 +169,6 @@ void MainWindow::on_pushButton_clicked()
                                      "Minecraft Textures (*.zip)"));
      }
      ui->progressBar->setValue(55);
-
 
     // Создание ZIP файла
     QZipWriter zip(outpt);
